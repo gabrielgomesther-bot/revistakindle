@@ -1,0 +1,21 @@
+from calibre.web.feeds.news import BasicNewsRecipe
+
+class JW_PT(BasicNewsRecipe):
+    title = 'JW - Novidades PT'
+    language = 'pt-BR'
+    encoding = 'utf-8'
+
+    # Diretrizes
+    oldest_article = 9999
+    max_articles_per_feed = 5
+    no_stylesheets = True
+
+    # Estrategia: Scraping + Limpeza Manual
+    keep_only_tags = [
+        dict(id='content') 
+    ]
+
+    # Feed unico
+    feeds = [
+        ('JW - Novidades PT', 'https://www.jw.org/pt/Novidades/rss/WhatsNewWebArticles/feed.xml')
+    ]
