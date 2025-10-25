@@ -6,33 +6,17 @@ class MinhaRevista(BasicNewsRecipe):
     language = 'pt-BR'
     encoding = 'utf-8'
 
-    # --- DIRETRIZ 1: Ignorar data ---
-    # Pega artigos independente da data de publicacao.
+    # --- DIRETRIZES (Mantidas) ---
     oldest_article = 9999
-
-    # --- DIRETRIZ 2: 5 Artigos ---
-    # Pega no maximo 5 artigos por feed.
     max_articles_per_feed = 5
-
-    # --- Limpeza Geral ---
     no_stylesheets = True
+
+    # --- DIRETRIZ DE CONFIANCA (Mantida) ---
+    # Forca o Calibre a usar o conteudo do RSS para o "THE NEWS"
+    use_embedded_content = True
     
-    # --- NOVA ESTRATEGIA: Scraping Manual ---
-    # Removemos 'auto_cleanup' e 'print_version'.
-    # Forcamos o Calibre a baixar todas as paginas e
-    # manter APENAS as tags que correspondem a estas regras:
-    
-    keep_only_tags = [
-        # Regra para jw.org (mantem a tag <article> e seu conteudo)
-        dict(name='article'),
-        
-        # Regra para Beehiiv (mantem tags com class='content')
-        # Esta e uma regra comum para blogs.
-        dict(class_='content'),
-        
-        # Regra de backup para Beehiiv (alguns temas usam 'single-post')
-        dict(class_='single-post')
-    ]
+    # --- REMOVEMOS 'keep_only_tags' ---
+    # keep_only_tags = [dict(name='article')] # REMOVIDO
 
     # Lista de feeds
     feeds = [
@@ -40,3 +24,33 @@ class MinhaRevista(BasicNewsRecipe):
         ('JW - Whats New EN', 'https://www.jw.org/en/whats-new/rss/WhatsNewWebArticles/feed.xml'),
         ('THE NEWS (Beehiiv)', 'https://rss.beehiiv.com/feeds/j9teVW9Qmi.xml'),
     ]
+
+    # --- O "INTERRUPTOR" HIBRIDO (Mantido) ---
+    # Decide o que fazer para cada artigo
+    def print_version(self, url):
+        if "beehiiv.com" in url:
+            # Para "THE NEWS": Nao baixe a pagina, use o RSS
+            return None
+        else:
+            # Para "JW.org": Baixe a pagina (para scraping)
+            return url
+
+    # --- A NOVA LOGICA DE LIMPEZA (Substitui 'keep_only_tags') ---
+    def postprocess_html(self, soup, first_fetch):
+        #
+        
+        # 1. Tentamos encontrar a tag <article> (que sabemos que o JW.org usa)
+        body = soup.find('article')
+        
+        # 2. Se encontrarmos a tag...
+        if body:
+            # ...limpamos a pagina e usamos apenas essa tag.
+            # (Isso so vai acontecer nos artigos do JW.org)
+            soup.body.clear()
+            soup.body.append(body)
+            return soup
+        
+        # 3. Se nao encontrarmos a tag <article>...
+        # ... (o que significa que e o conteudo do "THE NEWS" vindo do RSS)
+        # ... nao fazemos NADA e retornamos o 'soup' original, intacto.
+        return soup
