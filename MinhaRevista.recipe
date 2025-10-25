@@ -6,32 +6,22 @@ class MinhaRevista(BasicNewsRecipe):
     language = 'pt-BR'
     encoding = 'utf-8'
 
-    # --- DIRETRIZ 1: Ignorar data ---
-    # Pega artigos independente da data de publicacao.
+    # --- DIRETRIZES (Estao funcionando) ---
     oldest_article = 9999
-
-    # --- DIRETRIZ 2: 5 Artigos ---
-    # Pega no maximo 5 artigos por feed.
     max_articles_per_feed = 5
-
-    # --- Limpeza Geral ---
     no_stylesheets = True
+
+    # --- DIRETRIZ DE CONFIANCA (Nova) ---
+    # Forca o Calibre a usar o conteudo do feed quando
+    # o download da pagina e pulado (via print_version).
+    #
+    use_embedded_content = True
     
-    # --- NOVA ESTRATEGIA: Scraping Manual ---
-    # Removemos 'auto_cleanup' e 'print_version'.
-    # Forcamos o Calibre a baixar todas as paginas e
-    # manter APENAS as tags que correspondem a estas regras:
-    
+    # --- DIRETRIZ DE SCRAPING (Apenas para JW.org) ---
+    # Esta regra so sera aplicada as paginas baixadas (JW.org).
+    # Ela sera ignorada para o "THE NEWS" (Beehiiv).
     keep_only_tags = [
-        # Regra para jw.org (mantem a tag <article> e seu conteudo)
-        dict(name='article'),
-        
-        # Regra para Beehiiv (mantem tags com class='content')
-        # Esta e uma regra comum para blogs.
-        dict(class_='content'),
-        
-        # Regra de backup para Beehiiv (alguns temas usam 'single-post')
-        dict(class_='single-post')
+        dict(name='article')
     ]
 
     # Lista de feeds
@@ -40,3 +30,16 @@ class MinhaRevista(BasicNewsRecipe):
         ('JW - Whats New EN', 'https://www.jw.org/en/whats-new/rss/WhatsNewWebArticles/feed.xml'),
         ('THE NEWS (Beehiiv)', 'https://rss.beehiiv.com/feeds/j9teVW9Qmi.xml'),
     ]
+
+    # --- O "INTERRUPTOR" HIBRIDO ---
+    # Decide o que fazer para cada artigo
+    def print_version(self, url):
+        #
+        if "beehiiv.com" in url:
+            # Para o "THE NEWS": Nao baixe a pagina,
+            # use o conteudo do RSS (que use_embedded_content=True manda usar).
+            return None
+        else:
+            # Para o "JW.org": Baixe a pagina
+            # e aplique a regra 'keep_only_tags' nela.
+            return url
