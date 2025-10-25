@@ -1,8 +1,4 @@
-from urllib.parse import urljoin
-from email.utils import parsedate_to_datetime
-from datetime import datetime
 from calibre.web.feeds.news import BasicNewsRecipe
-
 
 class MinhaRevista(BasicNewsRecipe):
     title = 'Minha Revista Diaria'
@@ -10,135 +6,47 @@ class MinhaRevista(BasicNewsRecipe):
     language = 'pt-BR'
     encoding = 'utf-8'
 
+    # --- DIRETRIZ 1: Ignorar data ---
+    # Pega artigos independente da data de publicacao.
+    # O padrao e 7 dias.
+    oldest_article = 9999
+
+    # --- DIRETRIZ 2: 5 Artigos ---
+    # Pega no maximo 5 artigos por feed.
+    # O padrao e 100.
     max_articles_per_feed = 5
-    ignore_duplicate_articles = {'url', 'title'}
-    recursions = 1
+
+    # --- REFINAMENTO (Documentacao) ---
+    
+    # Habilita o algoritmo automatico de extracao de conteudo (Readability).
+    # Isso ira "limpar" as paginas baixadas (JW.org) automaticamente.
+    # O padrao e False.
+    auto_cleanup = True
+
+    # Desabilita o download de folhas de estilo (CSS).
+    # O padrao e False.
     no_stylesheets = True
 
-    preprocess_regexps = [
-        (r'(<p[^>]*>)', r'\1<!--SPLIT-->')
+    # Nao precisamos mais de 'remove_tags' ou 'postprocess_html',
+    # pois 'auto_cleanup = True' cuida da limpeza.
+
+    # Lista de feeds
+    feeds = [
+        ('JW - Novidades PT', 'https://www.jw.org/pt/Novidades/rss/WhatsNewWebArticles/feed.xml'),
+        ('JW - Whats New EN', 'https://www.jw.org/en/whats-new/rss/WhatsNewWebArticles/feed.xml'),
+        ('THE NEWS (Beehiiv)', 'https://rss.beehiiv.com/feeds/j9teVW9Qmi.xml'),
     ]
 
-    keep_only_tags = [
-        dict(name='article'),
-        dict(id='main-content'),
-        dict(class_='content'),
-    ]
-
-    remove_tags = [
-        dict(name='header'), dict(name='footer'),
-        dict(class_='nav'), dict(class_='menu'),
-        dict(class_='sidebar'), dict(id='comments'),
-        dict(class_='ad'), dict(name='script'),
-        dict(name='noscript'), dict(name='style'),
-    ]
-
-    feeds = {
-        'JW - Novidades PT': 'https://www.jw.org/pt/Novidades/rss/WhatsNewWebArticles/feed.xml',
-        'JW - Whats New EN': 'https://www.jw.org/en/whats-new/rss/WhatsNewWebArticles/feed.xml',
-        'THE NEWS (Beehiiv)': 'https://rss.beehiiv.com/feeds/j9teVW9Qmi.xml',
-    }
-
-    def parse_index(self):
-        ans = []
-        total_found = 0
-
-        for topic, url in self.feeds.items():
-            try:
-                soup = self.index_to_soup(url)
-            except Exception as e:
-                self.log.warn('Failed to fetch feed %s: %s' % (url, e))
-                continue
-
-            items = []
-            # RSS <item>, Atom <entry>, alguns feeds usam namespaces; buscar ambos
-            items.extend(soup.find_all('item'))
-            items.extend(soup.find_all('entry'))
-
-            if not items:
-                # Também tentar buscar por elementos com local-name (namespaced)
-                for tag in soup.find_all():
-                    if tag.name and tag.name.lower().endswith('item'):
-                        items.append(tag)
-                    elif tag.name and tag.name.lower().endswith('entry'):
-                        items.append(tag)
-
-            normalized = []
-            for it in items:
-                # extrair link robustamente
-                link = None
-                link_tag = it.find('link')
-                if link_tag:
-                    href = link_tag.get('href')
-                    if href:
-                        link = href.strip()
-                    elif link_tag.string:
-                        link = link_tag.get_text(strip=True)
-                # fallback: procurar <guid> ou <link> como texto
-                if not link:
-                    guid = it.find('guid')
-                    if guid and guid.get_text(strip=True):
-                        link = guid.get_text(strip=True)
-                if not link:
-                    # procura tag <a> dentro do item
-                    a = it.find('a')
-                    if a and a.get('href'):
-                        link = a.get('href').strip()
-                if not link:
-                    continue
-
-                title_tag = it.find('title')
-                title = title_tag.get_text(strip=True) if title_tag else link
-
-                # data: pubDate (RSS) ou updated/published (Atom)
-                pub_date = None
-                for tname in ('pubDate', 'published', 'updated'):
-                    tag = it.find(tname)
-                    if tag and tag.get_text(strip=True):
-                        pd = self.parse_date_safe(tag.get_text(strip=True))
-                        if pd:
-                            pub_date = pd
-                            break
-
-                normalized.append({
-                    'url': urljoin(url, link),
-                    'title': title,
-                    'date': pub_date or datetime.min
-                })
-
-            if not normalized:
-                self.log.info('No items found in feed %s' % url)
-                continue
-
-            # ordenar por data (mais recente primeiro) e pegar até max_articles_per_feed
-            normalized.sort(key=lambda x: x['date'], reverse=True)
-            selected = normalized[:self.max_articles_per_feed]
-
-            articles = [dict(url=item['url'], title=item['title']) for item in selected]
-            if articles:
-                ans.append((topic, articles))
-                total_found += len(articles)
-
-        if total_found == 0:
-            raise ValueError('No articles found, aborting')
-
-        return ans
-
-    def parse_date_safe(self, text):
-        try:
-            return parsedate_to_datetime(text)
-        except Exception:
-            pass
-        for fmt in ('%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S%z', '%Y-%m-%d'):
-            try:
-                return datetime.strptime(text, fmt)
-            except Exception:
-                continue
-        return None
-
+    # --- Logica Hibrida ---
+    # Este metodo decide QUAIS artigos devem passar pelo 'auto_cleanup'
     def print_version(self, url):
-        if 'beehiiv.com' in url:
+        #
+        if "beehiiv.com" in url:
+            # Retornar None FORCA o Calibre a usar o
+            # conteudo do RSS (que ja e completo) e PULA o auto_cleanup.
             return None
-        if 'jw.org' in url:
+        else:
+            # Retornar a URL (para JW.org)
+            # manda o Calibre baixar a pagina e,
+            # como 'auto_cleanup=True', ele vai limpar a pagina.
             return url
-        return url
