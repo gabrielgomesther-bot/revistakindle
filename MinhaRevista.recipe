@@ -33,7 +33,7 @@ class MinhaRevista(BasicNewsRecipe):
         dict(name='noscript'), dict(name='style'),
     ]
 
-    feed_urls = {
+    feeds = {
         'JW - Novidades PT': 'https://www.jw.org/pt/Novidades/rss/WhatsNewWebArticles/feed.xml',
         'JW - Whats New EN': 'https://www.jw.org/en/whats-new/rss/WhatsNewWebArticles/feed.xml',
         'THE NEWS (Beehiiv)': 'https://rss.beehiiv.com/feeds/j9teVW9Qmi.xml',
@@ -41,57 +41,94 @@ class MinhaRevista(BasicNewsRecipe):
 
     def parse_index(self):
         ans = []
-        for topic, url in self.feed_urls.items():
-            articles = []
-            soup = self.index_to_soup(url)
+        total_found = 0
 
-            # Suporta RSS (<item>) e Atom (<entry>)
-            items = soup.find_all(['item', 'entry'])
+        for topic, url in self.feeds.items():
+            try:
+                soup = self.index_to_soup(url)
+            except Exception as e:
+                self.log.warn('Failed to fetch feed %s: %s' % (url, e))
+                continue
+
+            items = []
+            # RSS <item>, Atom <entry>, alguns feeds usam namespaces; buscar ambos
+            items.extend(soup.find_all('item'))
+            items.extend(soup.find_all('entry'))
+
+            if not items:
+                # Também tentar buscar por elementos com local-name (namespaced)
+                for tag in soup.find_all():
+                    if tag.name and tag.name.lower().endswith('item'):
+                        items.append(tag)
+                    elif tag.name and tag.name.lower().endswith('entry'):
+                        items.append(tag)
+
             normalized = []
-
             for it in items:
-                # Link (RSS: <link>texto; Atom: <link href="...">)
-                link_tag = it.find('link')
+                # extrair link robustamente
                 link = None
+                link_tag = it.find('link')
                 if link_tag:
                     href = link_tag.get('href')
-                    link = href.strip() if href else (link_tag.get_text(strip=True) or None)
+                    if href:
+                        link = href.strip()
+                    elif link_tag.string:
+                        link = link_tag.get_text(strip=True)
+                # fallback: procurar <guid> ou <link> como texto
+                if not link:
+                    guid = it.find('guid')
+                    if guid and guid.get_text(strip=True):
+                        link = guid.get_text(strip=True)
+                if not link:
+                    # procura tag <a> dentro do item
+                    a = it.find('a')
+                    if a and a.get('href'):
+                        link = a.get('href').strip()
                 if not link:
                     continue
 
-                # Título
                 title_tag = it.find('title')
                 title = title_tag.get_text(strip=True) if title_tag else link
 
-                # Data (RSS: <pubDate>; Atom: <updated>/<published>)
+                # data: pubDate (RSS) ou updated/published (Atom)
                 pub_date = None
-                pub_tag = it.find('pubDate') or it.find('updated') or it.find('published')
-                if pub_tag and pub_tag.get_text(strip=True):
-                    text = pub_tag.get_text(strip=True)
-                    pub_date = self.parse_date_safe(text)
+                for tname in ('pubDate', 'published', 'updated'):
+                    tag = it.find(tname)
+                    if tag and tag.get_text(strip=True):
+                        pd = self.parse_date_safe(tag.get_text(strip=True))
+                        if pd:
+                            pub_date = pd
+                            break
 
                 normalized.append({
-                    'url': link,
+                    'url': urljoin(url, link),
                     'title': title,
-                    'date': pub_date or datetime.min  # fallback para ordenação
+                    'date': pub_date or datetime.min
                 })
 
-            # Ordena por data desc e pega os 5 mais recentes
-            normalized.sort(key=lambda x: x['date'], reverse=True)
-            for obj in normalized[:self.max_articles_per_feed]:
-                articles.append(dict(url=obj['url'], title=obj['title']))
+            if not normalized:
+                self.log.info('No items found in feed %s' % url)
+                continue
 
+            # ordenar por data (mais recente primeiro) e pegar até max_articles_per_feed
+            normalized.sort(key=lambda x: x['date'], reverse=True)
+            selected = normalized[:self.max_articles_per_feed]
+
+            articles = [dict(url=item['url'], title=item['title']) for item in selected]
             if articles:
                 ans.append((topic, articles))
+                total_found += len(articles)
+
+        if total_found == 0:
+            raise ValueError('No articles found, aborting')
+
         return ans
 
     def parse_date_safe(self, text):
-        # Tenta RFC2822 (RSS: "Wed, 25 Oct 2025 12:34:56 GMT")
         try:
             return parsedate_to_datetime(text)
         except Exception:
             pass
-        # Tenta ISO 8601 (Atom: "2025-10-25T12:34:56Z")
         for fmt in ('%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S%z', '%Y-%m-%d'):
             try:
                 return datetime.strptime(text, fmt)
