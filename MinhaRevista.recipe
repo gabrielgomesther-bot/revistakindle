@@ -6,32 +6,29 @@ class MinhaRevista(BasicNewsRecipe):
     language = 'pt-BR'
     encoding = 'utf-8'
 
-    # --- DIRETRIZ 1: Ignorar data ---
-    # Pega artigos independente da data de publicacao.
+    # --- DIRETRIZES (Mantidas) ---
     oldest_article = 9999
-
-    # --- DIRETRIZ 2: 5 Artigos ---
-    # Pega no maximo 5 artigos por feed.
     max_articles_per_feed = 5
-
-    # --- Limpeza Geral ---
     no_stylesheets = True
-    
-    # --- NOVA ESTRATEGIA: Scraping Manual ---
-    # Removemos 'auto_cleanup' e 'print_version'.
-    # Forcamos o Calibre a baixar todas as paginas e
-    # manter APENAS as tags que correspondem a estas regras:
+
+    # --- A MUDANCA PRINCIPAL ---
+    # Forca o Calibre a usar um navegador real (Chromium)
+    # que pode executar o JavaScript das paginas (ex: Beehiiv).
+    # O padrao e 'mechanize'
+    browser_type = 'webengine'
+
+    # --- ESTRATEGIA DE EXTRACAO (Scraping Total) ---
+    # Agora que o browser_type vai carregar o JavaScript,
+    # podemos usar os seletores corretos para CADA site.
     
     keep_only_tags = [
-        # Regra para jw.org (mantem a tag <article> e seu conteudo)
-        dict(name='article'),
+        # Regra para JW.org (Palpite novo: o conteudo principal
+        # esta em um 'div' com 'id="content"')
+        dict(id='content'),
         
-        # Regra para Beehiiv (mantem tags com class='content')
-        # Esta e uma regra comum para blogs.
-        dict(class_='content'),
-        
-        # Regra de backup para Beehiiv (alguns temas usam 'single-post')
-        dict(class_='single-post')
+        # Regra para "THE NEWS" (Beehiiv)
+        # (Com o JavaScript rodando, 'prose' e o mais provavel)
+        dict(class_='prose'),
     ]
 
     # Lista de feeds
@@ -40,3 +37,6 @@ class MinhaRevista(BasicNewsRecipe):
         ('JW - Whats New EN', 'https://www.jw.org/en/whats-new/rss/WhatsNewWebArticles/feed.xml'),
         ('THE NEWS (Beehiiv)', 'https://rss.beehiiv.com/feeds/j9teVW9Qmi.xml'),
     ]
+
+    # Nao precisamos mais de 'print_version', 'use_embedded_content'
+    # ou 'postprocess_html', pois estamos fazendo scraping de tudo.
