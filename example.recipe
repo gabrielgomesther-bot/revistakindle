@@ -1,68 +1,107 @@
 from urllib.parse import urljoin
-from datetime import datetime, timedelta
-
+from email.utils import parsedate_to_datetime
+from datetime import datetime
 from calibre.web.feeds.news import BasicNewsRecipe
 
 
-class Example(BasicNewsRecipe):
-    title = 'VOA Learning English'
-    description = 'This is example of Calibre recipe.'
-    language = 'en'
+class MinhaRevista(BasicNewsRecipe):
+    title = 'Minha Revista Diaria'
+    description = 'Revista de Noticias e Novidades.'
+    language = 'pt-BR'
     encoding = 'utf-8'
 
-    oldest_article = 1
-    utc_offset = 8
     max_articles_per_feed = 5
     ignore_duplicate_articles = {'url', 'title'}
-    keep_only_tags = [
-        dict(class_=['hdr-container']),
-        dict(id='article-content')]
-    remove_tags = [
-        dict(id='comments'),
-        dict(class_=['wsw__embed', 'share--box'])]
+    recursions = 1
+    no_stylesheets = True
 
-    siteurl = 'https://learningenglish.voanews.com'
+    preprocess_regexps = [
+        (r'(<p[^>]*>)', r'\1<!--SPLIT-->')
+    ]
+
+    keep_only_tags = [
+        dict(name='article'),
+        dict(id='main-content'),
+        dict(class_='content'),
+    ]
+
+    remove_tags = [
+        dict(name='header'), dict(name='footer'),
+        dict(class_='nav'), dict(class_='menu'),
+        dict(class_='sidebar'), dict(id='comments'),
+        dict(class_='ad'), dict(name='script'),
+        dict(name='noscript'), dict(name='style'),
+    ]
+
     feed_urls = {
-        'AS IT IS': 'https://learningenglish.voanews.com/z/3521',
-        'ARTS & CULTURE': 'https://learningenglish.voanews.com/z/986',
-        'AMERICAN STORIES': 'https://learningenglish.voanews.com/z/1581',
-        'ASK A TEACHER': 'https://learningenglish.voanews.com/z/5535',
-        'EVERYDAY GRAMMAR': 'https://learningenglish.voanews.com/z/4456',
-        'EDUCATION': 'https://learningenglish.voanews.com/z/959',
-        'HEALTH & LIFESTYLE': 'https://learningenglish.voanews.com/z/955',
-        'SCIENCE & TECHNOLOGY': 'https://learningenglish.voanews.com/z/1579',
-        'WORDS AND THEIR STORIES': 'https://learningenglish.voanews.com/z/987',
+        'JW - Novidades PT': 'https://www.jw.org/pt/Novidades/rss/WhatsNewWebArticles/feed.xml',
+        'JW - Whats New EN': 'https://www.jw.org/en/whats-new/rss/WhatsNewWebArticles/feed.xml',
+        'THE NEWS (Beehiiv)': 'https://rss.beehiiv.com/feeds/j9teVW9Qmi.xml',
     }
 
     def parse_index(self):
         ans = []
         for topic, url in self.feed_urls.items():
             articles = []
-            content = self.get_page_content(url)
-            items = content.select('ul#articleItems .media-block__content')
-            for item in items:
-                date = item.span.get_text().strip()
-                if self.out_time_range(date):
+            soup = self.index_to_soup(url)
+
+            # Suporta RSS (<item>) e Atom (<entry>)
+            items = soup.find_all(['item', 'entry'])
+            normalized = []
+
+            for it in items:
+                # Link (RSS: <link>texto; Atom: <link href="...">)
+                link_tag = it.find('link')
+                link = None
+                if link_tag:
+                    href = link_tag.get('href')
+                    link = href.strip() if href else (link_tag.get_text(strip=True) or None)
+                if not link:
                     continue
-                url = urljoin(self.siteurl, item.a.get('href'))
-                title = item.a.get_text().strip()
-                articles.append(dict(url=url, title=title, date=date))
-            if len(articles) > 0:
+
+                # Título
+                title_tag = it.find('title')
+                title = title_tag.get_text(strip=True) if title_tag else link
+
+                # Data (RSS: <pubDate>; Atom: <updated>/<published>)
+                pub_date = None
+                pub_tag = it.find('pubDate') or it.find('updated') or it.find('published')
+                if pub_tag and pub_tag.get_text(strip=True):
+                    text = pub_tag.get_text(strip=True)
+                    pub_date = self.parse_date_safe(text)
+
+                normalized.append({
+                    'url': link,
+                    'title': title,
+                    'date': pub_date or datetime.min  # fallback para ordenação
+                })
+
+            # Ordena por data desc e pega os 5 mais recentes
+            normalized.sort(key=lambda x: x['date'], reverse=True)
+            for obj in normalized[:self.max_articles_per_feed]:
+                articles.append(dict(url=obj['url'], title=obj['title']))
+
+            if articles:
                 ans.append((topic, articles))
         return ans
 
-    def get_page_content(self, url):
+    def parse_date_safe(self, text):
+        # Tenta RFC2822 (RSS: "Wed, 25 Oct 2025 12:34:56 GMT")
         try:
-            return self.index_to_soup(url)
-        except Exception as e:
-            self.log.error('Fetch article failed(%s): %s' % (e, url))
+            return parsedate_to_datetime(text)
+        except Exception:
+            pass
+        # Tenta ISO 8601 (Atom: "2025-10-25T12:34:56Z")
+        for fmt in ('%Y-%m-%dT%H:%M:%SZ', '%Y-%m-%dT%H:%M:%S%z', '%Y-%m-%d'):
+            try:
+                return datetime.strptime(text, fmt)
+            except Exception:
+                continue
+        return None
 
-    def out_time_range(self, date_string):
-        updated = datetime.strptime(date_string, '%B %d, %Y')  # May 19, 2024
-        if self.oldest_article > 0:
-            updated = datetime(updated.year, updated.month, updated.day)
-            current = datetime.utcnow() + timedelta(hours=self.utc_offset)
-            current = datetime(current.year, current.month, current.day)
-            delta = current - updated
-            return delta.days <= 0 or delta.days > self.oldest_article
-        return False
+    def print_version(self, url):
+        if 'beehiiv.com' in url:
+            return None
+        if 'jw.org' in url:
+            return url
+        return url
