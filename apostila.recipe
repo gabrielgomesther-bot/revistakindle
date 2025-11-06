@@ -59,19 +59,19 @@ class ApostilaMWB(BasicNewsRecipe):
     no_stylesheets = True
     remove_javascript = True
 
-    def get_browser(self, *args, **kwargs):
-        """
-        Finge ser um navegador Chrome comum para evitar ser bloqueado
-        pelo servidor (erro "Remote end closed connection").
-        [cite: get_browser(*args, **kwargs)]
-        """
-        br = super().get_browser(*args, **kwargs)
-        br.addheaders = [
-            ('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'),
-            ('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'),
-            ('Accept-Language', 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7')
-        ]
-        return br
+    def get_browser(self, *args, **kwargs):
+        """
+        Finge ser um navegador Chrome comum para evitar ser bloqueado
+        pelo servidor (erro "Remote end closed connection").
+        [cite: get_browser(*args, **kwargs)]
+        """
+        br = super().get_browser(*args, **kwargs)
+        br.addheaders = [
+            ('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'),
+            ('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'),
+            ('Accept-Language', 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7')
+        ]
+        return br
     
     # Nao usamos feeds RSS, entao 'feeds' e 'use_embedded_content' 
     # nao sao necessarios aqui.
