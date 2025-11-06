@@ -15,19 +15,39 @@ class ApostilaMWB(BasicNewsRecipe):
     description    = 'Apostila de Reunião Vida e Ministério Cristão completa, extraida do jw.org.'
 
     # --- CONFIGURACAO DE REDE ---
+    # Aumenta o tempo limite de 120s (padrao) para 600s (10 minutos)
     # [cite: timeout = 120.0]
     timeout = 600
+    
+    # Adiciona um atraso de 1 segundo entre os downloads para
+    # evitar ser bloqueado pelo servidor.
     # [cite: delay = 0]
     delay = 1
 
-    # --- CONFIGURACAO DE EXTRACAO ---
-    # [cite: index_url = 'https://www.jw.org/pt/biblioteca/jw-apostila-do-mes/novembro-dezembro-2025-mwb/']
+    # **** MUDANÇA IMPORTANTE ****
+    # Desabilita a compressao gzip, que pode ser usada para detectar bots
+    # [cite: handle_gzip = True]
+    handle_gzip = False
+
+    # --- CONFIGURACAO DE EXTRACAO (Onde a magica acontece) ---
+
+    # 1. NIVEL 1: O INDICE PRINCIPAL
+    #    Este e o URL da pagina que lista todos os "capitulos".
+    #
+    #    !!! IMPORTANTE !!!
+    #    Voce precisara atualizar este URL manualmente no arquivo
+    #    sempre que uma nova apostila for lancada (a cada 2 meses).
     index_url = 'https://www.jw.org/pt/biblioteca/jw-apostila-do-mes/novembro-dezembro-2025-mwb/'
 
-    # [cite: recursions = 0]
+    # 2. NIVEL 3: RECURSAO
+    #    Segue 1 nivel de links *dentro* das paginas dos capitulos.
+    #    [cite: recursions = 0]
     recursions = 1 
 
-    # [cite: keep_only_tags = []]
+    # 3. A REGRA DE OURO DA LIMPEZA
+    #    Em *todas* as paginas baixadas (Indice, Nivel 2, Nivel 3),
+    #    remove tudo exceto o conteudo dentro da tag <article id="article">.
+    #    [cite: keep_only_tags = []]
     keep_only_tags = [
         dict(id='article')
     ]
@@ -36,48 +56,81 @@ class ApostilaMWB(BasicNewsRecipe):
     no_stylesheets = True
     remove_javascript = True
 
-    # [cite: def get_browser(self, *args, **kwargs):]
+    # **** MUDANÇA IMPORTANTE ****
     def get_browser(self, *args, **kwargs):
+        """
+        Finge ser um navegador Chrome comum para evitar ser bloqueado
+        pelo servidor (erro "Remote end closed connection").
+        [cite: get_browser(*args, **kwargs)]
+        """
+        # Pega o navegador padrao do Calibre
         br = super().get_browser(*args, **kwargs)
-        br.addheaders = [
+        
+        # Define os headers que queremos enviar
+        # (Um User-Agent comum do Chrome/Windows)
+        headers = [
             ('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'),
             ('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'),
-            ('Accept-Language', 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7')
+            ('Accept-Language', 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7'),
+            ('Connection', 'keep-alive'),
+            ('Upgrade-Insecure-Requests', '1')
         ]
+        
+        # Substitui a lista de headers inteira pela nossa (em vez de 'br.addheaders = ...')
+        br.headers = headers
+        
         return br
     
+    # Nao usamos feeds RSS, entao 'feeds' e 'use_embedded_content' 
+    # nao sao necessarios aqui.
+
     # --- METODO DE EXTRACAO (Nivel 1 -> Nivel 2) ---
-    # [cite: def parse_index(self):]
+
     def parse_index(self):
+        """
+        Este metodo e chamado em vez de 'feeds'.
+        Ele baixa o 'index_url' (Nivel 1) e extrai os links
+        para os "capitulos" (Nivel 2).
+        [cite: parse_index()]
+        """
         
         self.log(f"Baixando indice de: {self.index_url}")
         
         try:
+            # Baixa e parseia a pagina de indice
             soup = self.index_to_soup(self.index_url)
         except Exception as e:
             self.log.error(f"Falha ao baixar o indice principal: {e}")
-            return [] 
+            return [] # Retorna lista vazia em caso de falha
 
+        # Encontra o container de conteudo principal no indice
+        # (Conforme sua verificacao: <article id="article">)
         main_content = soup.find('article', attrs={'id': 'article'})
 
         if not main_content:
             self.log.error("Nao foi possivel encontrar <article id='article'> na pagina de indice.")
             return []
 
-        articles = []
+        articles = [] # Lista para guardar os "capitulos" (Nivel 2)
+        
+        # Encontra todos os links <a> dentro do container principal
         links = main_content.find_all('a')
+        
         self.log(f"Encontrados {len(links)} links no indice principal.")
 
         for link in links:
-            # [cite: classmethod tag_to_string(tag, ...)]
-            title = self.tag_to_string(link) 
+            title = self.tag_to_string(link) # Pega o texto do link [cite: classmethod tag_to_string(tag, ...)]
             href = link.get('href')
 
+            # Ignora links invalidos, links de "ancora" (#), ou links sem texto
             if not href or not title or href.startswith('#') or not title.strip():
                 continue
                 
+            # Converte URLs relativas (ex: /pt/biblioteca/...) em
+            # URLs absolutas (ex: https://www.jw.org/pt/biblioteca/...)
             url = urljoin(self.index_url, href)
 
+            # Adiciona o "capitulo" a lista de artigos a serem baixados
             articles.append({
                 'title': title.strip(),
                 'url': url
@@ -85,5 +138,7 @@ class ApostilaMWB(BasicNewsRecipe):
 
         self.log(f"Processados {len(articles)} artigos (capitulos) validos.")
         
+        # Retorna a lista de capitulos para o Calibre processar.
+        # O formato e [ ('Titulo da Secao', lista_de_artigos) ]
         # [cite: parse_index()]
         return [('Apostila da Reunião', articles)]
