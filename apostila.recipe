@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from urllib.parse import urljoin, urlparse, urlunparse
+from urllib.parse import urljoin
 from calibre.web.feeds.news import BasicNewsRecipe
 
 class ApostilaMWB(BasicNewsRecipe):
@@ -34,11 +34,12 @@ class ApostilaMWB(BasicNewsRecipe):
     #    Este e o URL da pagina que lista todos os "capitulos".
     index_url = 'https://www.jw.org/pt/biblioteca/jw-apostila-do-mes/novembro-dezembro-2025-mwb/'
 
-    # 2. **** CORRECAO IMPORTANTE ****
-    #    Definimos recursions = 1 para baixar os links de Nivel 3
-    #    (textos biblicos, brochuras)
+    # 2. **** MUDANÇA IMPORTANTE ****
+    #    Definimos recursions = 0 para baixar APENAS as paginas
+    #    listadas no indice (Nivel 2), mas nao os links dentro delas (Nivel 3).
+    #    Isso evita o estouro de memoria (OOM Kill) no GitHub Actions.
     #    [cite: recursions = 0]
-    recursions = 1 
+    recursions = 0 
 
     # 3. A REGRA DE OURO DA LIMPEZA
     #    Em *todas* as paginas baixadas (Indice, Nivel 2, e Nivel 3),
@@ -73,44 +74,12 @@ class ApostilaMWB(BasicNewsRecipe):
     # Nao usamos feeds RSS, entao 'feeds' e 'use_embedded_content' 
     # nao sao necessarios aqui.
 
-    # --- **** NOVO METODO DE LIMPEZA DE LINKS **** ---
-    def preprocess_html(self, soup):
-        """
-        Este metodo e chamado *antes* do Calibre procurar por links para a recursao.
-        Ele remove os "#fragmentos" dos URLs, que causam o erro 'Could not fetch link'.
-        [cite: preprocess_html(soup)]
-        """
-        # Encontra todas as tags de link (<a>) com um atributo 'href'
-        for link in soup.find_all('a', href=True):
-            href = link['href']
-            # Se o link tiver um fragmento (#)
-            if '#' in href:
-                # Parseia o URL, remove o fragmento, e o reconstroi
-                parsed = urlparse(href)
-                # Recria o URL sem o 'fragment' (a parte apos o #)
-                clean_href = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, ''))
-                # Define o 'href' do link para o URL limpo
-                link['href'] = clean_href
-        return soup
-
-    # --- FUNCAO DE FILTRAGEM DE LINKS (NIVEL 3) ---
-    def is_link_wanted(self, url, tag):
-        """
-        Esta funcao e chamada para CADA link (agora limpo) encontrado,
-        gracas ao 'recursions = 1'.
-        [cite: is_link_wanted(url, tag)]
-        """
-        
-        # Ignora links de midia (videos, audio)
-        if '/media/' in url or '/clipes-video/' in url:
-            self.log(f"Ignorando link de midia: {url}")
-            return False
-
-        # Permite todos os outros links (incluindo /biblioteca/biblia/)
-        self.log(f"Seguindo link: {url}")
-        return True
+    # --- **** METODOS DE NIVEL 3 REMOVIDOS **** ---
+    # As funcoes 'preprocess_html' e 'is_link_wanted' foram removidas
+    # pois 'recursions = 0' e elas nao sao mais necessarias.
 
     # --- METODO DE EXTRACAO (Nivel 1 -> Nivel 2) ---
+
     def parse_index(self):
         """
         Baixa o 'index_url' (Nível 1) e extrai os links
