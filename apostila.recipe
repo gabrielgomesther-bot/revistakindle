@@ -22,6 +22,16 @@ class ApostilaMWB(BasicNewsRecipe):
     encoding       = 'utf-8'
     description    = 'Apostila de Reunião Vida e Ministério Cristão completa, extraida do jw.org.'
 
+    # --- CONFIGURACAO DE REDE ---
+    # Aumenta o tempo limite de 120s (padrao) para 600s (10 minutos)
+    # [cite: timeout = 120.0]
+    timeout = 600
+    
+    # Adiciona um atraso de 1 segundo entre os downloads para
+    # evitar ser bloqueado pelo servidor.
+    # [cite: delay = 0]
+    delay = 1
+
     # --- CONFIGURACAO DE EXTRACAO (Onde a magica acontece) ---
 
     # 1. NIVEL 1: O INDICE PRINCIPAL
