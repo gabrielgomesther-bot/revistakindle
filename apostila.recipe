@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlparse, urlunparse
 from calibre.web.feeds.news import BasicNewsRecipe
 
 class ApostilaMWB(BasicNewsRecipe):
     """
     Receita para baixar a "Apostila de Reunião Vida e Ministério" (MWB) completa
-    do jw.org.
+    do jw.org, incluindo as referencias de Nivel 3 (textos biblicos, brochuras).
     """
 
     # --- METADADOS DO E-BOOK ---
@@ -19,12 +19,11 @@ class ApostilaMWB(BasicNewsRecipe):
     # [cite: timeout = 120.0]
     timeout = 600
     
-    # Adiciona um atraso de 1 segundo entre os downloads para
+    # Aumenta o atraso para 2 segundos entre os downloads para
     # evitar ser bloqueado pelo servidor.
     # [cite: delay = 0]
-    delay = 1
+    delay = 2
 
-    # **** MUDANÇA IMPORTANTE ****
     # Desabilita a compressao gzip, que pode ser usada para detectar bots
     # [cite: handle_gzip = True]
     handle_gzip = False
@@ -33,19 +32,16 @@ class ApostilaMWB(BasicNewsRecipe):
 
     # 1. NIVEL 1: O INDICE PRINCIPAL
     #    Este e o URL da pagina que lista todos os "capitulos".
-    #
-    #    !!! IMPORTANTE !!!
-    #    Voce precisara atualizar este URL manualmente no arquivo
-    #    sempre que uma nova apostila for lancada (a cada 2 meses).
     index_url = 'https://www.jw.org/pt/biblioteca/jw-apostila-do-mes/novembro-dezembro-2025-mwb/'
 
-    # 2. NIVEL 3: RECURSAO
-    #    Segue 1 nivel de links *dentro* das paginas dos capitulos.
+    # 2. **** CORRECAO IMPORTANTE ****
+    #    Definimos recursions = 1 para baixar os links de Nivel 3
+    #    (textos biblicos, brochuras)
     #    [cite: recursions = 0]
     recursions = 1 
 
     # 3. A REGRA DE OURO DA LIMPEZA
-    #    Em *todas* as paginas baixadas (Indice, Nivel 2, Nivel 3),
+    #    Em *todas* as paginas baixadas (Indice, Nivel 2, e Nivel 3),
     #    remove tudo exceto o conteudo dentro da tag <article id="article">.
     #    [cite: keep_only_tags = []]
     keep_only_tags = [
@@ -56,18 +52,13 @@ class ApostilaMWB(BasicNewsRecipe):
     no_stylesheets = True
     remove_javascript = True
 
-    # **** MUDANÇA IMPORTANTE ****
     def get_browser(self, *args, **kwargs):
         """
         Finge ser um navegador Chrome comum para evitar ser bloqueado
         pelo servidor (erro "Remote end closed connection").
         [cite: get_browser(*args, **kwargs)]
         """
-        # Pega o navegador padrao do Calibre
         br = super().get_browser(*args, **kwargs)
-        
-        # Define os headers que queremos enviar
-        # (Um User-Agent comum do Chrome/Windows)
         headers = [
             ('User-Agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36'),
             ('Accept', 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'),
@@ -75,62 +66,85 @@ class ApostilaMWB(BasicNewsRecipe):
             ('Connection', 'keep-alive'),
             ('Upgrade-Insecure-Requests', '1')
         ]
-        
-        # Substitui a lista de headers inteira pela nossa (em vez de 'br.addheaders = ...')
+        # Substitui a lista de headers inteira pela nossa
         br.headers = headers
-        
         return br
     
     # Nao usamos feeds RSS, entao 'feeds' e 'use_embedded_content' 
     # nao sao necessarios aqui.
 
-    # --- METODO DE EXTRACAO (Nivel 1 -> Nivel 2) ---
+    # --- **** NOVO METODO DE LIMPEZA DE LINKS **** ---
+    def preprocess_html(self, soup):
+        """
+        Este metodo e chamado *antes* do Calibre procurar por links para a recursao.
+        Ele remove os "#fragmentos" dos URLs, que causam o erro 'Could not fetch link'.
+        [cite: preprocess_html(soup)]
+        """
+        # Encontra todas as tags de link (<a>) com um atributo 'href'
+        for link in soup.find_all('a', href=True):
+            href = link['href']
+            # Se o link tiver um fragmento (#)
+            if '#' in href:
+                # Parseia o URL, remove o fragmento, e o reconstroi
+                parsed = urlparse(href)
+                # Recria o URL sem o 'fragment' (a parte apos o #)
+                clean_href = urlunparse((parsed.scheme, parsed.netloc, parsed.path, parsed.params, parsed.query, ''))
+                # Define o 'href' do link para o URL limpo
+                link['href'] = clean_href
+        return soup
 
+    # --- FUNCAO DE FILTRAGEM DE LINKS (NIVEL 3) ---
+    def is_link_wanted(self, url, tag):
+        """
+        Esta funcao e chamada para CADA link (agora limpo) encontrado,
+        gracas ao 'recursions = 1'.
+        [cite: is_link_wanted(url, tag)]
+        """
+        
+        # Ignora links de midia (videos, audio)
+        if '/media/' in url or '/clipes-video/' in url:
+            self.log(f"Ignorando link de midia: {url}")
+            return False
+
+        # Permite todos os outros links (incluindo /biblioteca/biblia/)
+        self.log(f"Seguindo link: {url}")
+        return True
+
+    # --- METODO DE EXTRACAO (Nivel 1 -> Nivel 2) ---
     def parse_index(self):
         """
-        Este metodo e chamado em vez de 'feeds'.
-        Ele baixa o 'index_url' (Nivel 1) e extrai os links
-        para os "capitulos" (Nivel 2).
+        Baixa o 'index_url' (Nível 1) e extrai os links
+        para os "capitulos" (Nível 2).
         [cite: parse_index()]
         """
         
         self.log(f"Baixando indice de: {self.index_url}")
         
         try:
-            # Baixa e parseia a pagina de indice
             soup = self.index_to_soup(self.index_url)
         except Exception as e:
             self.log.error(f"Falha ao baixar o indice principal: {e}")
-            return [] # Retorna lista vazia em caso de falha
+            return []
 
-        # Encontra o container de conteudo principal no indice
-        # (Conforme sua verificacao: <article id="article">)
         main_content = soup.find('article', attrs={'id': 'article'})
 
         if not main_content:
             self.log.error("Nao foi possivel encontrar <article id='article'> na pagina de indice.")
             return []
 
-        articles = [] # Lista para guardar os "capitulos" (Nivel 2)
-        
-        # Encontra todos os links <a> dentro do container principal
+        articles = []
         links = main_content.find_all('a')
-        
         self.log(f"Encontrados {len(links)} links no indice principal.")
 
         for link in links:
-            title = self.tag_to_string(link) # Pega o texto do link [cite: classmethod tag_to_string(tag, ...)]
+            title = self.tag_to_string(link) # [cite: classmethod tag_to_string(tag, ...)]
             href = link.get('href')
 
-            # Ignora links invalidos, links de "ancora" (#), ou links sem texto
             if not href or not title or href.startswith('#') or not title.strip():
                 continue
                 
-            # Converte URLs relativas (ex: /pt/biblioteca/...) em
-            # URLs absolutas (ex: https://www.jw.org/pt/biblioteca/...)
             url = urljoin(self.index_url, href)
 
-            # Adiciona o "capitulo" a lista de artigos a serem baixados
             articles.append({
                 'title': title.strip(),
                 'url': url
@@ -138,7 +152,5 @@ class ApostilaMWB(BasicNewsRecipe):
 
         self.log(f"Processados {len(articles)} artigos (capitulos) validos.")
         
-        # Retorna a lista de capitulos para o Calibre processar.
-        # O formato e [ ('Titulo da Secao', lista_de_artigos) ]
         # [cite: parse_index()]
         return [('Apostila da Reunião', articles)]
